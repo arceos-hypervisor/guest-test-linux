@@ -102,7 +102,7 @@ fn build_linux(arch: &str) {
         "x86" => "bzImage",
         _ => "bzImage", // default for other architectures
     };
-    
+
     let mut make_args = vec![
         format!("O={}", build_dir.canonicalize().unwrap().display()),
         format!("ARCH={}", kernel_arch),
@@ -119,7 +119,10 @@ fn build_linux(arch: &str) {
     }
 
     // Run make
-    println!("Running make for {} with target {} and args: {:?}", arch, kernel_target, make_args);
+    println!(
+        "Running make for {} with target {} and args: {:?}",
+        arch, kernel_target, make_args
+    );
     let mut cmd = Command::new("make");
     cmd.current_dir(linux_dir).args(make_args);
     println!("{:?}", cmd);
