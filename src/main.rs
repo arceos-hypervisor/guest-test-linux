@@ -140,6 +140,9 @@ fn build_linux(arch: &str) {
         build_dir.display()
     );
 
+    // Copy kernel image to build/arch directory
+    copy_kernel_image(arch, kernel_target, &build_dir);
+
     // Build busybox and create rootfs
     build_busybox_and_rootfs(arch, &kernel_arch, &cross_compile_prefix_clone);
 }
@@ -598,4 +601,59 @@ fn calculate_rootfs_size(rootfs_dir: &Path) -> u64 {
 
     // Default to 100MB if calculation fails
     100
+}
+
+fn copy_kernel_image(arch: &str, kernel_target: &str, build_dir: &Path) {
+    println!("Copying kernel image for architecture: {}", arch);
+
+    let output_dir = PathBuf::from("build").join(arch);
+    fs::create_dir_all(&output_dir).expect("Failed to create output directory");
+
+    // Determine source kernel image path based on architecture and target
+    let source_kernel_path = match arch {
+        "arm64" => {
+            // For arm64, the Image is in arch/arm64/boot/Image
+            build_dir
+                .join("arch")
+                .join("arm64")
+                .join("boot")
+                .join("Image")
+        }
+        "x86" => {
+            // For x86, the bzImage is in arch/x86/boot/bzImage
+            build_dir
+                .join("arch")
+                .join("x86")
+                .join("boot")
+                .join("bzImage")
+        }
+        _ => {
+            eprintln!("Unsupported architecture for kernel copy: {}", arch);
+            return;
+        }
+    };
+
+    if !source_kernel_path.exists() {
+        eprintln!(
+            "Kernel image not found at: {}",
+            source_kernel_path.display()
+        );
+        return;
+    }
+
+    // Copy kernel image to build/arch directory
+    let dest_kernel_path = output_dir.join(kernel_target);
+
+    match fs::copy(&source_kernel_path, &dest_kernel_path) {
+        Ok(_) => {
+            println!(
+                "Kernel image copied successfully: {} -> {}",
+                source_kernel_path.display(),
+                dest_kernel_path.display()
+            );
+        }
+        Err(e) => {
+            eprintln!("Failed to copy kernel image: {}", e);
+        }
+    }
 }
