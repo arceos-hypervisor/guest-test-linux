@@ -1,0 +1,9 @@
+[package]
+edition = "2024"
+name = "guest-test-linux"
+version = "0.1.0"
+
+[dependencies]
+clap = {version = "4.0", features = ["derive"]}
+log = "0.4"
+env_logger = "0.10"
