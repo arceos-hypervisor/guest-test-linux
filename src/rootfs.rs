@@ -25,10 +25,11 @@ pub fn calculate_rootfs_size(rootfs_dir: &Path) -> u64 {
     // Use du command to calculate directory size in MB
     let output = Command::new("du")
         .args(["-sm", &rootfs_dir.to_string_lossy()])
-        .output()
-        .expect("Failed to calculate rootfs size");
+        .output();
 
-    if output.status.success() {
+    if let Ok(output) = output
+        && output.status.success()
+    {
         let size_str = String::from_utf8_lossy(&output.stdout);
         if let Some(size_part) = size_str.split_whitespace().next()
             && let Ok(size) = size_part.parse::<u64>()
@@ -37,12 +38,36 @@ pub fn calculate_rootfs_size(rootfs_dir: &Path) -> u64 {
         }
     }
 
-    // Default to 100MB if calculation fails
-    100
+    // Fallback: estimate by walking files if du fails (small, conservative number)
+    let mut total_bytes: u64 = 0;
+    if let Ok(entries) = rootfs_dir.read_dir() {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Ok(meta) = fs::metadata(&path) {
+                total_bytes = total_bytes.saturating_add(meta.len());
+            }
+        }
+    }
+
+    // Convert bytes to MB, add minimal default
+    let mut size_mb = if total_bytes > 0 {
+        total_bytes / (1024 * 1024)
+    } else {
+        50
+    };
+    if size_mb == 0 {
+        size_mb = 50;
+    }
+    size_mb
 }
 
 /// Create rootfs for a specific configuration
-pub fn create_rootfs_for_config(config_name: &str, _arch: &str, kernel_arch: &str, cross_compile_prefix: &Option<String>) {
+pub fn create_rootfs_for_config(
+    config_name: &str,
+    _arch: &str,
+    kernel_arch: &str,
+    cross_compile_prefix: &Option<String>,
+) {
     println!("Creating rootfs for configuration: {}", config_name);
 
     let rootfs_dir = PathBuf::from("build").join(config_name).join("rootfs");
@@ -78,7 +103,10 @@ pub fn create_rootfs_for_config(config_name: &str, _arch: &str, kernel_arch: &st
         .expect("Failed to install busybox");
 
     if !status.success() {
-        eprintln!("Failed to install busybox for configuration: {}", config_name);
+        eprintln!(
+            "Failed to install busybox for configuration: {}",
+            config_name
+        );
         return;
     }
 
@@ -131,12 +159,62 @@ pub fn create_rootfs_for_config(config_name: &str, _arch: &str, kernel_arch: &st
         .expect("Failed to install kernel modules");
 
     if !status.success() {
-        eprintln!("Failed to install kernel modules for configuration: {}", config_name);
+        eprintln!(
+            "Failed to install kernel modules for configuration: {}",
+            config_name
+        );
         // Continue anyway, modules might not be essential
     }
 
     // Create init script
     create_init_script(&rootfs_dir);
+
+    // Locate kernel image and copy into rootfs boot directory
+    println!("Locating kernel image and copying into rootfs boot directory...");
+
+    // Determine possible kernel image paths
+    let possible_images = vec![
+        linux_build_dir
+            .join("arch")
+            .join("arm64")
+            .join("boot")
+            .join("Image"),
+        linux_build_dir
+            .join("arch")
+            .join("x86")
+            .join("boot")
+            .join("bzImage"),
+        linux_build_dir.join("Image"),
+        linux_build_dir.join("bzImage"),
+    ];
+
+    let mut found_image: Option<PathBuf> = None;
+    for img in possible_images {
+        if img.exists() {
+            found_image = Some(img);
+            break;
+        }
+    }
+
+    if let Some(img_path) = found_image {
+        // Copy the kernel image to rootfs/boot for common layout
+        let boot_dir = rootfs_dir.join("boot");
+        if let Err(e) = fs::create_dir_all(&boot_dir) {
+            eprintln!("Failed to create boot dir {:?}: {}", boot_dir, e);
+        } else {
+            let boot_dest = boot_dir.join(img_path.file_name().unwrap());
+            match fs::copy(&img_path, &boot_dest) {
+                Ok(_) => println!(
+                    "Copied kernel image to boot: {} -> {}",
+                    img_path.display(),
+                    boot_dest.display()
+                ),
+                Err(e) => eprintln!("Failed to copy kernel image to boot: {}", e),
+            }
+        }
+    } else {
+        println!("No kernel image found in build directory to copy into rootfs");
+    }
 
     // Create rootfs image
     create_rootfs_image(config_name, &rootfs_dir, &output_dir);
@@ -147,8 +225,13 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
     println!("Creating rootfs.img...");
     let rootfs_img = output_dir.join("rootfs.img");
 
-    // Calculate size (add some extra space)
-    let size_mb = calculate_rootfs_size(rootfs_dir) + 50; // Add 50MB extra
+    // Calculate size (add larger safety margin: 30% + 200MB minimum)
+    let base_size = calculate_rootfs_size(rootfs_dir);
+    let mut size_mb = (base_size as f64 * 1.3).ceil() as u64;
+    // Ensure at least base + 200MB extra
+    if size_mb < base_size + 200 {
+        size_mb = base_size + 200;
+    }
 
     // Create empty image file
     let status = Command::new("dd")
@@ -162,7 +245,10 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
         .expect("Failed to create rootfs image file");
 
     if !status.success() {
-        eprintln!("Failed to create rootfs image file for configuration: {}", config_name);
+        eprintln!(
+            "Failed to create rootfs image file for configuration: {}",
+            config_name
+        );
         return;
     }
 
@@ -173,7 +259,10 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
         .expect("Failed to format rootfs image");
 
     if !status.success() {
-        eprintln!("Failed to format rootfs image for configuration: {}", config_name);
+        eprintln!(
+            "Failed to format rootfs image for configuration: {}",
+            config_name
+        );
         return;
     }
 
@@ -193,7 +282,10 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
         .expect("Failed to mount rootfs image");
 
     if !status.success() {
-        eprintln!("Failed to mount rootfs image for configuration: {}", config_name);
+        eprintln!(
+            "Failed to mount rootfs image for configuration: {}",
+            config_name
+        );
         return;
     }
 
@@ -249,6 +341,9 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
             rootfs_img.display()
         );
     } else {
-        eprintln!("Failed to copy files to rootfs image for configuration: {}", config_name);
+        eprintln!(
+            "Failed to copy files to rootfs image for configuration: {}",
+            config_name
+        );
     }
 }
