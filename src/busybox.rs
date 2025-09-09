@@ -95,6 +95,8 @@ fn build_busybox_for_config(config_name: &str, cross_compile_prefix: &Option<Str
                 "CONFIG_STATIC=y".to_string()
             } else if line.starts_with("CONFIG_FEATURE_SHARED_BUSYBOX=y") {
                 "# CONFIG_FEATURE_SHARED_BUSYBOX is not set".to_string()
+            } else if line.starts_with("CONFIG_TC=y") {
+                "# CONFIG_TC is not set".to_string()
             } else {
                 line.to_string()
             }
