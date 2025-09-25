@@ -254,7 +254,7 @@ fn create_rootfs_image(config_name: &str, rootfs_dir: &Path, output_dir: &Path) 
 
     // Format as ext4
     let status = Command::new("mkfs.ext4")
-        .args(["-F", &rootfs_img.to_string_lossy()])
+        .args(["-F", "-O", "^metadata_csum_seed", &rootfs_img.to_string_lossy()])
         .status()
         .expect("Failed to format rootfs image");
 
